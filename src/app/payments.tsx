@@ -3,27 +3,27 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PaymentStatusToggle } from '@/components/payment-status-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useTranslation } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
 import {
-  getPaymentRows,
-  updatePaymentStatus,
-  generateWhatsAppReminderMessage,
-  generateWhatsAppReceiptMessage,
-  getMembers,
-  PaymentRecord,
-  PaymentMode,
-  subscribeToDbChange,
+    generateWhatsAppReceiptMessage,
+    generateWhatsAppReminderMessage,
+    getChitByName,
+    getMembers,
+    getPaymentRows,
+    PaymentRecord,
+    subscribeToDbChange,
+    updatePaymentStatus,
 } from '@/lib/db';
-
-const paymentStatuses: ('Pending' | 'Partially paid' | 'Paid')[] = ['Pending', 'Partially paid', 'Paid'];
-const paymentModes: PaymentMode[] = ['Cash', 'UPI'];
 
 export default function PaymentsScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const theme = useTheme();
+  const { t } = useTranslation();
 
   const [paymentRows, setPaymentRows] = useState<PaymentRecord[]>([]);
 
@@ -40,13 +40,12 @@ export default function PaymentsScreen() {
     };
   }, [loadData]);
 
-  const handleStatusUpdate = (row: PaymentRecord, status: 'Pending' | 'Partially paid' | 'Paid', mode?: PaymentMode) => {
-    const activeMode = mode || row.mode || 'Cash';
-    updatePaymentStatus(row.id || row.member, status, activeMode);
-  };
-
-  const handleModeUpdate = (row: PaymentRecord, mode: PaymentMode) => {
-    updatePaymentStatus(row.id || row.member, row.status === 'Pending' ? 'Paid' : row.status, mode);
+  const handleStatusToggle = (row: PaymentRecord) => {
+    updatePaymentStatus(
+      row.id || row.member,
+      row.status === 'Paid' ? 'Pending' : 'Paid',
+      row.mode || 'Cash',
+    );
   };
 
   const handleShareWhatsApp = async (row: PaymentRecord, type: 'reminder' | 'receipt') => {
@@ -56,11 +55,12 @@ export default function PaymentsScreen() {
       phone: '',
       chit_name: row.chit_name || 'Chit',
     };
+    const chit = row.chit_name ? getChitByName(row.chit_name) : undefined;
 
     const message =
       type === 'reminder'
-        ? generateWhatsAppReminderMessage(memberObj, row.due)
-        : generateWhatsAppReceiptMessage(memberObj, row.due, row.mode || 'Cash');
+        ? generateWhatsAppReminderMessage(memberObj, row.due, undefined, chit?.current_month, chit?.duration)
+        : generateWhatsAppReceiptMessage(memberObj, row.due, row.mode || 'Cash', undefined, chit?.current_month, chit?.duration);
 
     const cleanPhone = memberObj.phone ? memberObj.phone.replace(/[^\d+]/g, '') : '';
     const targetPhone = cleanPhone ? cleanPhone.replace('+', '') : '';
@@ -107,54 +107,15 @@ export default function PaymentsScreen() {
                     <ThemedText type="small" themeColor="textSecondary">
                       {row.chit_name || 'Chit'} · {row.due}
                     </ThemedText>
-                    {row.status !== 'Pending' && (
-                      <View style={styles.modeRow}>
-                        <ThemedText type="small" style={{ fontSize: 10, color: '#6b7280' }}>
-                          Mode:
-                        </ThemedText>
-                        {paymentModes.map((m) => (
-                          <Pressable
-                            key={m}
-                            onPress={() => handleModeUpdate(row, m)}
-                            style={[
-                              styles.modeChip,
-                              (row.mode || 'Cash') === m && styles.modeChipActive,
-                            ]}>
-                            <ThemedText
-                              type="small"
-                              style={[
-                                styles.modeChipText,
-                                (row.mode || 'Cash') === m && styles.modeChipTextActive,
-                              ]}>
-                              {m === 'Cash' ? 'Cash' : 'UPI'}
-                            </ThemedText>
-                          </Pressable>
-                        ))}
-                      </View>
-                    )}
                   </View>
 
                   <View style={styles.rightBlock}>
-                    <View style={styles.statusChips}>
-                      {paymentStatuses.map((st) => (
-                        <Pressable
-                          key={st}
-                          onPress={() => handleStatusUpdate(row, st)}
-                          style={[
-                            styles.chip,
-                            row.status === st && styles.chipActive,
-                          ]}>
-                          <ThemedText
-                            type="small"
-                            style={[
-                              styles.chipText,
-                              row.status === st && styles.chipTextActive,
-                            ]}>
-                            {st === 'Partially paid' ? 'Partial' : st}
-                          </ThemedText>
-                        </Pressable>
-                      ))}
-                    </View>
+                    <PaymentStatusToggle
+                      isPaid={row.status === 'Paid'}
+                      paidLabel={t('paidStatus')}
+                      pendingLabel={row.status === 'Partially paid' ? t('partialStatus') : t('pendingStatus')}
+                      onToggle={() => handleStatusToggle(row)}
+                    />
 
                     <Pressable
                       onPress={() => handleShareWhatsApp(row, row.status === 'Paid' ? 'receipt' : 'reminder')}
@@ -195,53 +156,6 @@ const styles = StyleSheet.create({
   },
   leftBlock: { gap: 4 },
   rightBlock: { alignItems: 'flex-end', gap: 6 },
-  modeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  modeChip: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: '#f3f4f6',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  modeChipActive: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
-  },
-  modeChipText: {
-    fontSize: 9,
-    color: '#374151',
-  },
-  modeChipTextActive: {
-    color: '#ffffff',
-    fontWeight: '700',
-  },
-  statusChips: {
-    flexDirection: 'row',
-    gap: 4,
-  },
-  chip: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: '#e5e7eb',
-  },
-  chipActive: {
-    backgroundColor: '#111827',
-  },
-  chipText: {
-    fontSize: 10,
-    color: '#374151',
-  },
-  chipTextActive: {
-    color: '#ffffff',
-    fontWeight: '600',
-  },
   waBtn: {
     paddingHorizontal: 6,
     paddingVertical: 2,

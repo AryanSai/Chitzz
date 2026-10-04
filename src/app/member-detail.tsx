@@ -8,12 +8,13 @@ import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
-  getMembers,
-  getPaymentRows,
-  generateWhatsAppReminderMessage,
-  MemberRecord,
-  PaymentRecord,
-  subscribeToDbChange,
+    generateWhatsAppReminderMessage,
+    getChitByName,
+    getMembers,
+    getPaymentRows,
+    MemberRecord,
+    PaymentRecord,
+    subscribeToDbChange,
 } from '@/lib/db';
 
 export default function MemberDetailScreen() {
@@ -55,7 +56,14 @@ export default function MemberDetailScreen() {
 
   const handleWhatsAppReminder = async () => {
     const dueStr = payment ? payment.due : '₹3,000';
-    const message = generateWhatsAppReminderMessage(member, dueStr);
+    const chit = getChitByName(member.chit_name);
+    const message = generateWhatsAppReminderMessage(
+      member,
+      dueStr,
+      undefined,
+      chit?.current_month,
+      chit?.duration,
+    );
     const cleanPhone = member.phone.replace(/[^\d+]/g, '');
     const url = `https://wa.me/${cleanPhone.replace('+', '')}?text=${encodeURIComponent(message)}`;
 

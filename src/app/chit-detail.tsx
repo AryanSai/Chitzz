@@ -3,30 +3,28 @@ import { useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PaymentStatusToggle } from '@/components/payment-status-toggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTranslation } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
 import {
-  getChits,
-  getMembersByChit,
-  getDraws,
-  getPaymentRows,
-  updatePaymentStatus,
-  generateWhatsAppReminderMessage,
-  generateWhatsAppReceiptMessage,
-  closeChit,
-  ChitRecord,
-  MemberRecord,
-  DrawRecord,
-  PaymentRecord,
-  PaymentMode,
-  subscribeToDbChange,
+    ChitRecord,
+    closeChit,
+    deleteChit,
+    DrawRecord,
+    generateWhatsAppReceiptMessage,
+    generateWhatsAppReminderMessage,
+    getChits,
+    getDraws,
+    getMembersByChit,
+    getPaymentRows,
+    MemberRecord,
+    PaymentRecord,
+    subscribeToDbChange,
+    updatePaymentStatus,
 } from '@/lib/db';
-
-const paymentStatuses: ('Pending' | 'Partially paid' | 'Paid')[] = ['Pending', 'Partially paid', 'Paid'];
-const paymentModes: PaymentMode[] = ['Cash', 'UPI'];
 
 export default function ChitDetailScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -49,17 +47,19 @@ export default function ChitDetailScreen() {
       setMembers(getMembersByChit(found.name));
       setDraws(getDraws(found.name));
       const allPayments = getPaymentRows();
-      setPayments(allPayments.filter((p) => (p.chit_name || '').toLowerCase() === found.name.toLowerCase() || p.member));
+      const memberNames = new Set(getMembersByChit(found.name).map((member) => member.name));
+      setPayments(allPayments.filter(
+        (payment) => (payment.chit_name || '').toLowerCase() === found.name.toLowerCase() || memberNames.has(payment.member),
+      ));
     }
   };
 
-  const handleStatusUpdate = (payment: PaymentRecord, status: 'Pending' | 'Partially paid' | 'Paid', mode?: PaymentMode) => {
-    const activeMode = mode || payment.mode || 'Cash';
-    updatePaymentStatus(payment.id || payment.member, status, activeMode);
-  };
-
-  const handleModeUpdate = (payment: PaymentRecord, mode: PaymentMode) => {
-    updatePaymentStatus(payment.id || payment.member, payment.status === 'Pending' ? 'Paid' : payment.status, mode);
+  const handleStatusToggle = (payment: PaymentRecord) => {
+    updatePaymentStatus(
+      payment.id || payment.member,
+      payment.status === 'Paid' ? 'Pending' : 'Paid',
+      payment.mode || 'Cash',
+    );
   };
 
   const handleShareWhatsApp = async (member: MemberRecord, payment?: PaymentRecord, type: 'reminder' | 'receipt' = 'reminder') => {
@@ -67,8 +67,8 @@ export default function ChitDetailScreen() {
     const modeStr = payment?.mode || 'Cash';
     const message =
       type === 'reminder'
-        ? generateWhatsAppReminderMessage(member, dueStr, chit?.reminder_template)
-        : generateWhatsAppReceiptMessage(member, dueStr, modeStr, chit?.receipt_template);
+        ? generateWhatsAppReminderMessage(member, dueStr, chit?.reminder_template, chit?.current_month, chit?.duration)
+        : generateWhatsAppReceiptMessage(member, dueStr, modeStr, chit?.receipt_template, chit?.current_month, chit?.duration);
 
     const cleanPhone = member.phone ? member.phone.replace(/[^\d+]/g, '') : '';
     const targetPhone = cleanPhone ? cleanPhone.replace('+', '') : '';
@@ -103,6 +103,25 @@ export default function ChitDetailScreen() {
     );
   };
 
+  const handleDeleteChit = () => {
+    if (!chit) return;
+    Alert.alert(
+      t('deleteChitConfirmTitle'),
+      t('deleteChitConfirmBody'),
+      [
+        { text: t('cancel'), style: 'cancel' },
+        {
+          text: t('deleteChit'),
+          style: 'destructive',
+          onPress: () => {
+            deleteChit(chit.id);
+            router.back();
+          },
+        },
+      ],
+    );
+  };
+
   useEffect(() => {
     loadData();
     const unsubscribe = subscribeToDbChange(loadData);
@@ -118,19 +137,6 @@ export default function ChitDetailScreen() {
       </ThemedView>
     );
   }
-
-  const getStatusLabel = (st: string) => {
-    if (st === 'Pending') return t('pendingStatus');
-    if (st === 'Partially paid') return t('partialStatus');
-    if (st === 'Paid') return t('paidStatus');
-    return st;
-  };
-
-  const getModeLabel = (mode: string) => {
-    if (mode === 'Cash') return t('cashMode');
-    if (mode === 'UPI') return t('upiMode');
-    return mode;
-  };
 
   return (
     <ThemedView style={{ flex: 1, backgroundColor: theme.background }}>
@@ -148,25 +154,35 @@ export default function ChitDetailScreen() {
             <Pressable onPress={() => router.back()} style={styles.backButton}>
               <ThemedText type="smallBold">{t('back')}</ThemedText>
             </Pressable>
-            <ThemedText type="subtitle">{chit.name}</ThemedText>
-            <View style={{ flexDirection: 'row', gap: 6 }}>
+            <ThemedText type="subtitle" style={{ flex: 1 }} numberOfLines={1}>
+              {chit.name}
+            </ThemedText>
+          </View>
+          <View style={styles.headerActions}>
+            <Pressable
+              onPress={() => router.push('/record-draw' as any)}
+              style={styles.actionButton}>
+              <ThemedText type="smallBold" style={styles.actionButtonText}>
+                {t('draw')}
+              </ThemedText>
+            </Pressable>
+            {chit.status !== 'closed' && (
               <Pressable
-                onPress={() => router.push('/record-draw' as any)}
-                style={styles.actionButton}>
+                onPress={handleCloseChit}
+                style={[styles.actionButton, { backgroundColor: '#dc2626' }]}>
                 <ThemedText type="smallBold" style={styles.actionButtonText}>
-                  {t('draw')}
+                  {t('close')}
                 </ThemedText>
               </Pressable>
-              {chit.status !== 'closed' && (
-                <Pressable
-                  onPress={handleCloseChit}
-                  style={[styles.actionButton, { backgroundColor: '#dc2626' }]}>
-                  <ThemedText type="smallBold" style={styles.actionButtonText}>
-                    {t('close')}
-                  </ThemedText>
-                </Pressable>
-              )}
-            </View>
+            )}
+            <Pressable
+              onPress={handleDeleteChit}
+              style={[styles.actionButton, { backgroundColor: '#b91c1c' }]}
+              accessibilityRole="button">
+              <ThemedText type="smallBold" style={styles.actionButtonText}>
+                {t('deleteChit')}
+              </ThemedText>
+            </Pressable>
           </View>
 
           {/* Overview Card */}
@@ -234,23 +250,22 @@ export default function ChitDetailScreen() {
                 {t('noMembers')}
               </ThemedText>
             ) : (
-              members.map((m) => {
-                const payment = payments.find((p) => p.member === m.name);
+              members.map((member) => {
+                const payment = payments.find((item) => item.member === member.name);
                 const currentStatus = payment?.status || 'Pending';
-                const currentMode = payment?.mode || 'Cash';
 
                 return (
-                  <View key={m.id} style={styles.memberPaymentCard}>
+                  <View key={member.id} style={styles.memberPaymentCard}>
                     <View style={styles.memberTopRow}>
                       <View style={{ flex: 1 }}>
-                        <ThemedText type="smallBold">{m.name}</ThemedText>
+                        <ThemedText type="smallBold">{member.name}</ThemedText>
                         <ThemedText type="small" themeColor="textSecondary">
-                          {m.phone} · {t('status')}: {m.status}
+                          {member.phone} · {t('status')}: {member.status}
                         </ThemedText>
                       </View>
                       {payment && (
                         <Pressable
-                          onPress={() => handleShareWhatsApp(m, payment, currentStatus === 'Paid' ? 'receipt' : 'reminder')}
+                          onPress={() => handleShareWhatsApp(member, payment, currentStatus === 'Paid' ? 'receipt' : 'reminder')}
                           style={styles.waBtn}>
                           <ThemedText type="small" style={{ fontSize: 11, color: '#16a34a', fontWeight: '600' }}>
                             {currentStatus === 'Paid' ? t('receipt') : t('remind')}
@@ -258,56 +273,14 @@ export default function ChitDetailScreen() {
                         </Pressable>
                       )}
                     </View>
-
-                    {/* Status & Payment Mode Assignment Row */}
                     {payment && (
                       <View style={styles.paymentControlsRow}>
-                        <View style={styles.statusChips}>
-                          {paymentStatuses.map((st) => (
-                            <Pressable
-                              key={st}
-                              onPress={() => handleStatusUpdate(payment, st)}
-                              style={[
-                                styles.chip,
-                                currentStatus === st && styles.chipActive,
-                              ]}>
-                              <ThemedText
-                                type="small"
-                                style={[
-                                  styles.chipText,
-                                  currentStatus === st && styles.chipTextActive,
-                                ]}>
-                                {getStatusLabel(st)}
-                              </ThemedText>
-                            </Pressable>
-                          ))}
-                        </View>
-
-                        {currentStatus !== 'Pending' && (
-                          <View style={styles.modeRow}>
-                            <ThemedText type="small" style={{ fontSize: 10, color: '#6b7280' }}>
-                              Mode:
-                            </ThemedText>
-                            {paymentModes.map((mode) => (
-                              <Pressable
-                                key={mode}
-                                onPress={() => handleModeUpdate(payment, mode)}
-                                style={[
-                                  styles.modeChip,
-                                  currentMode === mode && styles.modeChipActive,
-                                ]}>
-                                <ThemedText
-                                  type="small"
-                                  style={[
-                                    styles.modeChipText,
-                                    currentMode === mode && styles.modeChipTextActive,
-                                  ]}>
-                                  {getModeLabel(mode)}
-                                </ThemedText>
-                              </Pressable>
-                            ))}
-                          </View>
-                        )}
+                        <PaymentStatusToggle
+                          isPaid={currentStatus === 'Paid'}
+                          paidLabel={t('paidStatus')}
+                          pendingLabel={currentStatus === 'Partially paid' ? t('partialStatus') : t('pendingStatus')}
+                          onToggle={() => handleStatusToggle(payment)}
+                        />
                       </View>
                     )}
                   </View>
@@ -359,6 +332,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 6,
   },
   backButton: {
     paddingVertical: Spacing.one,
@@ -422,52 +401,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: 6,
-  },
-  statusChips: {
-    flexDirection: 'row',
-    gap: 4,
-  },
-  chip: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: '#e5e7eb',
-  },
-  chipActive: {
-    backgroundColor: '#111827',
-  },
-  chipText: {
-    fontSize: 10,
-    color: '#374151',
-  },
-  chipTextActive: {
-    color: '#ffffff',
-    fontWeight: '600',
-  },
-  modeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  modeChip: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: '#f3f4f6',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  modeChipActive: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
-  },
-  modeChipText: {
-    fontSize: 9,
-    color: '#374151',
-  },
-  modeChipTextActive: {
-    color: '#ffffff',
-    fontWeight: '700',
   },
   waBtn: {
     paddingHorizontal: 6,

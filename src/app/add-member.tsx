@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -8,8 +8,8 @@ import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTranslation } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
-import { fetchDeviceContacts, DeviceContact } from '@/lib/contacts';
-import { createMember, getChits, ChitRecord } from '@/lib/db';
+import { pickDeviceContact } from '@/lib/contacts';
+import { ChitRecord, createMember, getChits } from '@/lib/db';
 
 const memberStatuses: ('Active' | 'Pending' | 'Picked')[] = ['Active', 'Pending', 'Picked'];
 
@@ -26,10 +26,6 @@ export default function AddMemberScreen() {
   const [selectedChit, setSelectedChit] = useState<string>('Unassigned');
   const [status, setStatus] = useState<'Active' | 'Pending' | 'Picked'>('Active');
 
-  // Contact Picker State
-  const [showContactPicker, setShowContactPicker] = useState(false);
-  const [deviceContacts, setDeviceContacts] = useState<DeviceContact[]>([]);
-  const [contactSearch, setContactSearch] = useState('');
   const [loadingContacts, setLoadingContacts] = useState(false);
 
   useEffect(() => {
@@ -39,31 +35,22 @@ export default function AddMemberScreen() {
 
   const handleOpenContactPicker = async () => {
     setLoadingContacts(true);
-    const contacts = await fetchDeviceContacts();
-    setLoadingContacts(false);
-
-    if (contacts === null) {
+    try {
+      const contact = await pickDeviceContact();
+      if (contact) {
+        setName(contact.name);
+        setPhone(contact.phone);
+      }
+    } catch {
       Alert.alert(
-        'Notice',
-        'Device contact picker is available when running native dev builds with Expo Contacts. You can enter member details manually below.'
+        'Contacts unavailable',
+        'Use a native build and allow contact access, or enter the member details manually.',
       );
-      return;
-    }
-
-    if (contacts.length > 0) {
-      setDeviceContacts(contacts.filter((c) => c.name));
-      setShowContactPicker(true);
-    } else {
-      Alert.alert('No Contacts', 'No contacts found on device.');
+    } finally {
+      setLoadingContacts(false);
     }
   };
 
-  const handleSelectContact = (c: DeviceContact) => {
-    setName(c.name || '');
-    const phoneNum = c.phoneNumbers && c.phoneNumbers.length > 0 ? c.phoneNumbers[0].number : '';
-    setPhone(phoneNum || '');
-    setShowContactPicker(false);
-  };
 
   const handleSave = () => {
     const trimmedName = name.trim();
@@ -91,10 +78,6 @@ export default function AddMemberScreen() {
     router.back();
   };
 
-  const filteredContacts = deviceContacts.filter((c) =>
-    (c.name || '').toLowerCase().includes(contactSearch.toLowerCase())
-  );
-
   return (
     <ThemedView style={{ flex: 1, backgroundColor: theme.background }}>
       <ScrollView
@@ -117,7 +100,7 @@ export default function AddMemberScreen() {
           <ThemedView type="backgroundElement" style={styles.formCard}>
             <Pressable onPress={handleOpenContactPicker} style={styles.syncButton}>
               <ThemedText type="smallBold" style={{ color: '#111827' }}>
-                {loadingContacts ? 'Reading Contacts...' : 'Sync / Pick from Phone Contacts'}
+                {loadingContacts ? 'Opening Contacts...' : 'Choose from phone contacts'}
               </ThemedText>
             </Pressable>
 
@@ -216,46 +199,6 @@ export default function AddMemberScreen() {
         </View>
       </ScrollView>
 
-      {/* Phone Contact Selection Modal */}
-      <Modal visible={showContactPicker} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <ThemedText type="subtitle">Select Phone Contact</ThemedText>
-              <Pressable onPress={() => setShowContactPicker(false)}>
-                <ThemedText type="smallBold">Close</ThemedText>
-              </Pressable>
-            </View>
-
-            <TextInput
-              value={contactSearch}
-              onChangeText={setContactSearch}
-              placeholder="Search contacts..."
-              style={styles.searchInput}
-            />
-
-            <ScrollView style={{ maxHeight: 350 }}>
-              {filteredContacts.slice(0, 50).map((c) => {
-                const ph = c.phoneNumbers && c.phoneNumbers.length > 0 ? c.phoneNumbers[0].number : 'No number';
-                return (
-                  <Pressable
-                    key={c.id || c.name}
-                    onPress={() => handleSelectContact(c)}
-                    style={styles.contactRow}>
-                    <View>
-                      <ThemedText type="smallBold">{c.name}</ThemedText>
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {ph}
-                      </ThemedText>
-                    </View>
-                    <ThemedText type="linkPrimary">Select</ThemedText>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </ThemedView>
   );
 }
@@ -331,42 +274,5 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: '#ffffff',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    width: '100%',
-    maxWidth: 500,
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 16,
-    gap: 12,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  searchInput: {
-    minHeight: 40,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    fontSize: 13,
-  },
-  contactRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
   },
 });

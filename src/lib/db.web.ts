@@ -115,18 +115,25 @@ const fallbackState = {
   auditEvents: [] as AuditEventRecord[],
 };
 
-let database: ReturnType<SQLiteLike["openDatabaseSync"]> | null = null;
+const webStorageKey = "chitzz-data-v1";
 
 try {
-  const SQLiteModule = require("expo-sqlite") as SQLiteLike;
-  if (SQLiteModule?.openDatabaseSync) {
-    database = SQLiteModule.openDatabaseSync("chitzz.db");
+  if (typeof localStorage !== "undefined") {
+    const savedState = localStorage.getItem(webStorageKey);
+    if (savedState) Object.assign(fallbackState, JSON.parse(savedState));
   }
 } catch (error) {
-  console.warn(
-    "expo-sqlite unavailable; using in-memory fallback data.",
-    error,
-  );
+  console.warn("Unable to load saved browser data.", error);
+}
+
+function persistFallbackState() {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(webStorageKey, JSON.stringify(fallbackState));
+    }
+  } catch (error) {
+    console.warn("Unable to persist browser data.", error);
+  }
 }
 
 export function clearAllData() {
@@ -135,16 +142,7 @@ export function clearAllData() {
   fallbackState.payments = [];
   fallbackState.draws = [];
   fallbackState.auditEvents = [];
-
-  if (database) {
-    database.execSync(`
-      DELETE FROM chits;
-      DELETE FROM members;
-      DELETE FROM payments;
-      DELETE FROM draws;
-      DELETE FROM audit_events;
-    `);
-  }
+  persistFallbackState();
   notifyDbListeners();
 }
 
@@ -213,105 +211,6 @@ export function seedSampleData() {
   notifyDbListeners();
 }
 
-function initSchema() {
-  if (!database) return;
-
-  database.execSync(`
-    CREATE TABLE IF NOT EXISTS chits (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      total_value INTEGER NOT NULL,
-      current_month INTEGER NOT NULL,
-      duration INTEGER NOT NULL,
-      member_count INTEGER NOT NULL,
-      before_pick INTEGER NOT NULL,
-      after_pick INTEGER NOT NULL,
-      progress INTEGER NOT NULL,
-      pending_count INTEGER NOT NULL,
-      first_month_payout INTEGER NOT NULL DEFAULT 0,
-      payout_increment INTEGER NOT NULL DEFAULT 0,
-      payout TEXT NOT NULL,
-      start_date TEXT NOT NULL DEFAULT '',
-      reminder_template TEXT NOT NULL DEFAULT '',
-      receipt_template TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'active'
-    );
-
-    CREATE TABLE IF NOT EXISTS members (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      chit_name TEXT NOT NULL,
-      status TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS payments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      member TEXT NOT NULL,
-      due TEXT NOT NULL,
-      status TEXT NOT NULL,
-      mode TEXT NOT NULL DEFAULT 'Cash',
-      chit_name TEXT DEFAULT ''
-    );
-
-    CREATE TABLE IF NOT EXISTS draws (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      chit_name TEXT NOT NULL,
-      cycle_month INTEGER NOT NULL,
-      winner_name TEXT NOT NULL,
-      payout_amount INTEGER NOT NULL,
-      discount_amount INTEGER NOT NULL,
-      draw_date TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS audit_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      action TEXT NOT NULL,
-      details TEXT NOT NULL,
-      timestamp TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS app_settings (
-      key TEXT PRIMARY KEY NOT NULL,
-      value TEXT NOT NULL
-    );
-  `);
-
-  // Auto-migrate schema columns for existing sqlite database files
-  try {
-    database.execSync(
-      `ALTER TABLE chits ADD COLUMN first_month_payout INTEGER NOT NULL DEFAULT 0;`,
-    );
-  } catch (e) {}
-  try {
-    database.execSync(
-      `ALTER TABLE chits ADD COLUMN payout_increment INTEGER NOT NULL DEFAULT 0;`,
-    );
-  } catch (e) {}
-  try {
-    database.execSync(
-      `ALTER TABLE chits ADD COLUMN start_date TEXT NOT NULL DEFAULT '';`,
-    );
-  } catch (e) {}
-  try {
-    database.execSync(
-      `ALTER TABLE chits ADD COLUMN reminder_template TEXT NOT NULL DEFAULT '';`,
-    );
-  } catch (e) {}
-  try {
-    database.execSync(
-      `ALTER TABLE chits ADD COLUMN receipt_template TEXT NOT NULL DEFAULT '';`,
-    );
-  } catch (e) {}
-  try {
-    database.execSync(
-      `ALTER TABLE payments ADD COLUMN mode TEXT NOT NULL DEFAULT 'Cash';`,
-    );
-  } catch (e) {}
-}
-
-initSchema();
-
 export function logAuditEvent(action: string, details: string) {
   const timestamp = new Date().toISOString();
   const event: AuditEventRecord = {
@@ -320,15 +219,8 @@ export function logAuditEvent(action: string, details: string) {
     details,
     timestamp,
   };
-
-  if (!database) {
-    fallbackState.auditEvents.unshift(event);
-  } else {
-    database.runSync(
-      "INSERT INTO audit_events (action, details, timestamp) VALUES (?, ?, ?)",
-      [action, details, timestamp],
-    );
-  }
+  fallbackState.auditEvents.unshift(event);
+  persistFallbackState();
   notifyDbListeners();
 }
 
@@ -360,47 +252,36 @@ export function getDashboardSummary() {
 }
 
 export function getChits(): ChitRecord[] {
-  if (!database) return fallbackState.chits;
-  return database.getAllSync(
-    "SELECT * FROM chits ORDER BY id ASC",
-  ) as unknown as ChitRecord[];
+  return fallbackState.chits;
 }
 
 export function getChitById(id: number): ChitRecord | undefined {
-  const chits = getChits();
-  return chits.find((c) => c.id === id);
+  return fallbackState.chits.find((c) => c.id === id);
 }
 
 export function getChitByName(name: string): ChitRecord | undefined {
-  const chits = getChits();
-  return chits.find((c) => c.name.toLowerCase() === name.toLowerCase());
+  return fallbackState.chits.find(
+    (c) => c.name.toLowerCase() === name.toLowerCase(),
+  );
 }
 
 export function getMembers(): MemberRecord[] {
-  if (!database) return fallbackState.members;
-  return database.getAllSync(
-    "SELECT * FROM members ORDER BY id ASC",
-  ) as unknown as MemberRecord[];
+  return fallbackState.members;
 }
 
 export function getMemberById(id: number): MemberRecord | undefined {
-  const members = getMembers();
-  return members.find((m) => m.id === id);
+  return fallbackState.members.find((m) => m.id === id);
 }
 
 export function getMembersByChit(chitName: string): MemberRecord[] {
-  const members = getMembers();
-  if (!chitName || chitName === "All") return members;
-  return members.filter(
+  if (!chitName || chitName === "All") return fallbackState.members;
+  return fallbackState.members.filter(
     (m) => m.chit_name.toLowerCase() === chitName.toLowerCase(),
   );
 }
 
 export function getPaymentRows(): PaymentRecord[] {
-  if (!database) return fallbackState.payments;
-  return database.getAllSync(
-    "SELECT * FROM payments ORDER BY id ASC",
-  ) as unknown as PaymentRecord[];
+  return fallbackState.payments;
 }
 
 export function getLedgerEntries(): LedgerEntry[] {
@@ -517,32 +398,7 @@ export function createChit(input: {
     receipt_template: input.receipt_template?.trim() || "",
   };
 
-  if (!database) {
-    fallbackState.chits.unshift(record);
-  } else {
-    database.runSync(
-      `INSERT INTO chits (name, total_value, current_month, duration, member_count, before_pick, after_pick, progress, pending_count, first_month_payout, payout_increment, payout, start_date, reminder_template, receipt_template, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        record.name,
-        record.total_value,
-        record.current_month,
-        record.duration,
-        record.member_count,
-        record.before_pick,
-        record.after_pick,
-        record.progress,
-        record.pending_count,
-        record.first_month_payout,
-        record.payout_increment,
-        record.payout,
-        record.start_date,
-        record.reminder_template,
-        record.receipt_template,
-        record.status,
-      ],
-    );
-  }
+  fallbackState.chits.unshift(record);
 
   logAuditEvent(
     "CREATE_CHIT",
@@ -557,17 +413,10 @@ export function updateChitTemplates(
   reminderTemplate: string,
   receiptTemplate: string,
 ) {
-  if (!database) {
-    const chit = fallbackState.chits.find((c) => c.id === chitId);
-    if (chit) {
-      chit.reminder_template = reminderTemplate.trim();
-      chit.receipt_template = receiptTemplate.trim();
-    }
-  } else {
-    database.runSync(
-      `UPDATE chits SET reminder_template = ?, receipt_template = ? WHERE id = ?`,
-      [reminderTemplate.trim(), receiptTemplate.trim(), chitId],
-    );
+  const chit = fallbackState.chits.find((c) => c.id === chitId);
+  if (chit) {
+    chit.reminder_template = reminderTemplate.trim();
+    chit.receipt_template = receiptTemplate.trim();
   }
   logAuditEvent(
     "UPDATE_TEMPLATES",
@@ -606,35 +455,16 @@ export function createMember(input: {
         : chit.before_pick
       : 0;
 
-    if (!database) {
-      fallbackState.members.unshift(record);
-      if (finalChitName !== "Unassigned" && dueAmount > 0) {
-        fallbackState.payments.unshift({
-          id: Date.now() + i + 1000,
-          member: record.name,
-          due: asCurrency(dueAmount),
-          status: "Pending",
-          mode: "Cash",
-          chit_name: record.chit_name,
-        });
-      }
-    } else {
-      database.runSync(
-        `INSERT INTO members (name, phone, chit_name, status) VALUES (?, ?, ?, ?)`,
-        [record.name, record.phone, record.chit_name, record.status],
-      );
-      if (finalChitName !== "Unassigned" && dueAmount > 0) {
-        database.runSync(
-          `INSERT INTO payments (member, due, status, mode, chit_name) VALUES (?, ?, ?, ?, ?)`,
-          [
-            record.name,
-            asCurrency(dueAmount),
-            "Pending",
-            "Cash",
-            record.chit_name,
-          ],
-        );
-      }
+    fallbackState.members.unshift(record);
+    if (finalChitName !== "Unassigned" && dueAmount > 0) {
+      fallbackState.payments.unshift({
+        id: Date.now() + i + 1000,
+        member: record.name,
+        due: asCurrency(dueAmount),
+        status: "Pending",
+        mode: "Cash",
+        chit_name: record.chit_name,
+      });
     }
     createdMembers.push(record);
   }
@@ -654,27 +484,14 @@ export function updatePaymentStatus(
   status: "Pending" | "Partially paid" | "Paid",
   mode: PaymentMode = "Cash",
 ) {
-  if (!database) {
-    const payment =
-      typeof idOrMember === "number"
-        ? fallbackState.payments.find((row) => row.id === idOrMember)
-        : fallbackState.payments.find((row) => row.member === idOrMember);
-    if (payment) {
-      payment.status = status;
-      payment.mode = mode;
-    }
-  } else {
-    if (typeof idOrMember === "number") {
-      database.runSync(
-        `UPDATE payments SET status = ?, mode = ? WHERE id = ?`,
-        [status, mode, idOrMember],
-      );
-    } else {
-      database.runSync(
-        `UPDATE payments SET status = ?, mode = ? WHERE member = ?`,
-        [status, mode, idOrMember],
-      );
-    }
+  const payment =
+    typeof idOrMember === "number"
+      ? fallbackState.payments.find((row) => row.id === idOrMember)
+      : fallbackState.payments.find((row) => row.member === idOrMember);
+
+  if (payment) {
+    payment.status = status;
+    payment.mode = mode;
   }
 
   logAuditEvent(
@@ -704,38 +521,13 @@ export function recordDraw(input: {
     draw_date: drawDate,
   };
 
-  if (!database) {
-    fallbackState.draws.unshift(record);
-    const member = input.member_id
-      ? fallbackState.members.find((m) => m.id === input.member_id)
-      : fallbackState.members.find(
-          (m) => m.name === input.winner_name && m.status !== "Picked",
-        );
-    if (member) member.status = "Picked";
-  } else {
-    database.runSync(
-      `INSERT INTO draws (chit_name, cycle_month, winner_name, payout_amount, discount_amount, draw_date)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        record.chit_name,
-        record.cycle_month,
-        record.winner_name,
-        record.payout_amount,
-        record.discount_amount,
-        record.draw_date,
-      ],
-    );
-    if (input.member_id) {
-      database.runSync(`UPDATE members SET status = 'Picked' WHERE id = ?`, [
-        input.member_id,
-      ]);
-    } else {
-      database.runSync(
-        `UPDATE members SET status = 'Picked' WHERE rowid IN (SELECT rowid FROM members WHERE name = ? AND status != 'Picked' LIMIT 1)`,
-        [input.winner_name],
+  fallbackState.draws.unshift(record);
+  const member = input.member_id
+    ? fallbackState.members.find((m) => m.id === input.member_id)
+    : fallbackState.members.find(
+        (m) => m.name === input.winner_name && m.status !== "Picked",
       );
-    }
-  }
+  if (member) member.status = "Picked";
 
   logAuditEvent(
     "RECORD_DRAW",
@@ -746,51 +538,27 @@ export function recordDraw(input: {
 }
 
 export function getDraws(chitName?: string): DrawRecord[] {
-  if (!database) {
-    if (!chitName) return fallbackState.draws;
-    return fallbackState.draws.filter(
-      (d) => d.chit_name.toLowerCase() === chitName.toLowerCase(),
-    );
-  }
-  if (!chitName) {
-    return database.getAllSync(
-      "SELECT * FROM draws ORDER BY id DESC",
-    ) as unknown as DrawRecord[];
-  }
-  return database.getAllSync(
-    "SELECT * FROM draws WHERE chit_name = ? ORDER BY id DESC",
-    [chitName],
-  ) as unknown as DrawRecord[];
+  if (!chitName) return fallbackState.draws;
+  return fallbackState.draws.filter(
+    (d) => d.chit_name.toLowerCase() === chitName.toLowerCase(),
+  );
 }
 
 export function getAuditEvents(): AuditEventRecord[] {
-  if (!database) return fallbackState.auditEvents;
-  return database.getAllSync(
-    "SELECT * FROM audit_events ORDER BY id DESC",
-  ) as unknown as AuditEventRecord[];
+  return fallbackState.auditEvents;
 }
 
 export function closeChit(chitId: number) {
   const chit = getChitById(chitId);
   if (!chit) return null;
 
-  if (!database) {
-    const item = fallbackState.chits.find((c) => c.id === chitId);
-    if (item) item.status = "closed";
-    fallbackState.members.forEach((m) => {
-      if (m.chit_name.toLowerCase() === chit.name.toLowerCase()) {
-        m.chit_name = `${chit.name} (Closed)`;
-      }
-    });
-  } else {
-    database.runSync(`UPDATE chits SET status = 'closed' WHERE id = ?`, [
-      chitId,
-    ]);
-    database.runSync(
-      `UPDATE members SET chit_name = ? WHERE LOWER(chit_name) = ?`,
-      [`${chit.name} (Closed)`, chit.name.toLowerCase()],
-    );
-  }
+  const item = fallbackState.chits.find((c) => c.id === chitId);
+  if (item) item.status = "closed";
+  fallbackState.members.forEach((m) => {
+    if (m.chit_name.toLowerCase() === chit.name.toLowerCase()) {
+      m.chit_name = `${chit.name} (Closed)`;
+    }
+  });
 
   logAuditEvent(
     "CLOSE_CHIT",
@@ -804,37 +572,23 @@ export function deleteChit(chitId: number) {
   const chit = getChitById(chitId);
   if (!chit) return false;
 
-  if (!database) {
-    fallbackState.chits = fallbackState.chits.filter(
-      (item) => item.id !== chitId,
-    );
-    fallbackState.payments = fallbackState.payments.filter(
-      (payment) => payment.chit_name?.toLowerCase() !== chit.name.toLowerCase(),
-    );
-    fallbackState.draws = fallbackState.draws.filter(
-      (draw) => draw.chit_name.toLowerCase() !== chit.name.toLowerCase(),
-    );
-    fallbackState.members.forEach((member) => {
-      if (
-        member.chit_name.toLowerCase() === chit.name.toLowerCase() ||
-        member.chit_name.toLowerCase() === `${chit.name} (closed)`.toLowerCase()
-      ) {
-        member.chit_name = "Unassigned";
-      }
-    });
-  } else {
-    database.runSync("DELETE FROM payments WHERE LOWER(chit_name) = ?", [
-      chit.name.toLowerCase(),
-    ]);
-    database.runSync("DELETE FROM draws WHERE LOWER(chit_name) = ?", [
-      chit.name.toLowerCase(),
-    ]);
-    database.runSync(
-      "UPDATE members SET chit_name = 'Unassigned' WHERE LOWER(chit_name) IN (?, ?)",
-      [chit.name.toLowerCase(), `${chit.name} (closed)`.toLowerCase()],
-    );
-    database.runSync("DELETE FROM chits WHERE id = ?", [chitId]);
-  }
+  fallbackState.chits = fallbackState.chits.filter(
+    (item) => item.id !== chitId,
+  );
+  fallbackState.payments = fallbackState.payments.filter(
+    (payment) => payment.chit_name?.toLowerCase() !== chit.name.toLowerCase(),
+  );
+  fallbackState.draws = fallbackState.draws.filter(
+    (draw) => draw.chit_name.toLowerCase() !== chit.name.toLowerCase(),
+  );
+  fallbackState.members.forEach((member) => {
+    if (
+      member.chit_name.toLowerCase() === chit.name.toLowerCase() ||
+      member.chit_name.toLowerCase() === `${chit.name} (closed)`.toLowerCase()
+    ) {
+      member.chit_name = "Unassigned";
+    }
+  });
 
   logAuditEvent(
     "DELETE_CHIT",
@@ -856,22 +610,22 @@ const appSettings = {
 };
 
 try {
-  const savedSettings = database?.getFirstSync(
-    "SELECT value FROM app_settings WHERE key = ?",
-    ["app_settings"],
-  )?.value;
-  if (typeof savedSettings === "string") {
-    Object.assign(appSettings, JSON.parse(savedSettings));
+  if (typeof localStorage !== "undefined") {
+    const savedSettings = localStorage.getItem("chitzz-settings-v1");
+    if (savedSettings) Object.assign(appSettings, JSON.parse(savedSettings));
   }
 } catch (error) {
-  console.warn("Unable to load saved app settings.", error);
+  console.warn("Unable to load saved browser settings.", error);
 }
 
 function persistAppSettings() {
-  database?.runSync(
-    "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
-    ["app_settings", JSON.stringify(appSettings)],
-  );
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("chitzz-settings-v1", JSON.stringify(appSettings));
+    }
+  } catch (error) {
+    console.warn("Unable to persist browser settings.", error);
+  }
 }
 
 export function getAppLanguage(): "en" | "te" {
