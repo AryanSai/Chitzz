@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PaymentStatusToggle } from '@/components/payment-status-toggle';
+import { PaymentEntryModal } from '@/components/payment-entry-modal';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
@@ -16,8 +16,10 @@ import {
     getMembers,
     getPaymentRows,
     PaymentRecord,
+    PaymentMode,
+    parseCurrency,
+    recordPayment,
     subscribeToDbChange,
-    updatePaymentStatus,
 } from '@/lib/db';
 
 export default function PaymentsScreen() {
@@ -26,6 +28,7 @@ export default function PaymentsScreen() {
   const { t } = useTranslation();
 
   const [paymentRows, setPaymentRows] = useState<PaymentRecord[]>([]);
+  const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
 
   const loadData = useCallback(() => {
     setPaymentRows(getPaymentRows());
@@ -40,12 +43,17 @@ export default function PaymentsScreen() {
     };
   }, [loadData]);
 
-  const handleStatusToggle = (row: PaymentRecord) => {
-    updatePaymentStatus(
-      row.id || row.member,
-      row.status === 'Paid' ? 'Pending' : 'Paid',
-      row.mode || 'Cash',
-    );
+  const handleRecordPayment = (row: PaymentRecord, paidAmount: number, mode: PaymentMode) => {
+    try {
+      if (!recordPayment(row.id, paidAmount, mode)) {
+        Alert.alert(t('recordPayment'), t('paymentUpdateFailed'));
+        return;
+      }
+      setSelectedPayment(null);
+    } catch (error) {
+      console.error('Unable to record member payment.', error);
+      Alert.alert(t('recordPayment'), t('paymentUpdateFailed'));
+    }
   };
 
   const handleShareWhatsApp = async (row: PaymentRecord, type: 'reminder' | 'receipt') => {
@@ -59,8 +67,21 @@ export default function PaymentsScreen() {
 
     const message =
       type === 'reminder'
-        ? generateWhatsAppReminderMessage(memberObj, row.due, undefined, chit?.current_month, chit?.duration)
-        : generateWhatsAppReceiptMessage(memberObj, row.due, row.mode || 'Cash', undefined, chit?.current_month, chit?.duration);
+        ? generateWhatsAppReminderMessage(
+            memberObj,
+            `₹${Math.max(0, parseCurrency(row.due) - row.paid_amount).toLocaleString('en-IN')}`,
+            undefined,
+            chit?.current_month,
+            chit?.duration,
+          )
+        : generateWhatsAppReceiptMessage(
+            memberObj,
+            `₹${row.paid_amount.toLocaleString('en-IN')}`,
+            row.mode || 'Cash',
+            undefined,
+            chit?.current_month,
+            chit?.duration,
+          );
 
     const cleanPhone = memberObj.phone ? memberObj.phone.replace(/[^\d+]/g, '') : '';
     const targetPhone = cleanPhone ? cleanPhone.replace('+', '') : '';
@@ -105,17 +126,25 @@ export default function PaymentsScreen() {
                   <View style={styles.leftBlock}>
                     <ThemedText type="smallBold">{row.member}</ThemedText>
                     <ThemedText type="small" themeColor="textSecondary">
-                      {row.chit_name || 'Chit'} · {row.due}
+                      {row.chit_name || 'Chit'} · {t('paidSoFar')}: ₹{row.paid_amount.toLocaleString('en-IN')} / {row.due}
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {t('pendingStatus')}: ₹{Math.max(0, parseCurrency(row.due) - row.paid_amount).toLocaleString('en-IN')}
+                    </ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {t(row.status === 'Paid' ? 'paidStatus' : row.status === 'Partially paid' ? 'partialStatus' : 'pendingStatus')}
                     </ThemedText>
                   </View>
 
                   <View style={styles.rightBlock}>
-                    <PaymentStatusToggle
-                      isPaid={row.status === 'Paid'}
-                      paidLabel={t('paidStatus')}
-                      pendingLabel={row.status === 'Partially paid' ? t('partialStatus') : t('pendingStatus')}
-                      onToggle={() => handleStatusToggle(row)}
-                    />
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => setSelectedPayment(row)}
+                      style={styles.paymentButton}>
+                      <ThemedText type="smallBold" style={styles.paymentButtonText}>
+                        {t('recordPayment')}
+                      </ThemedText>
+                    </Pressable>
 
                     <Pressable
                       onPress={() => handleShareWhatsApp(row, row.status === 'Paid' ? 'receipt' : 'reminder')}
@@ -131,6 +160,26 @@ export default function PaymentsScreen() {
           </ThemedView>
         </View>
       </ScrollView>
+      {selectedPayment && (
+        <PaymentEntryModal
+          key={selectedPayment.id}
+          visible
+          memberName={selectedPayment.member}
+          due={selectedPayment.due}
+          paidAmount={selectedPayment.paid_amount}
+          mode={selectedPayment.mode || 'Cash'}
+          title={t('recordPayment')}
+          paidSoFarLabel={t('paidSoFar')}
+          paymentModeLabel={t('paymentMode')}
+          cashLabel={t('cashMode')}
+          upiLabel={t('upiMode')}
+          cancelLabel={t('cancel')}
+          saveLabel={t('save')}
+          amountError={(due) => t('amountMustBeWithinDue').replace('{due}', due)}
+          onCancel={() => setSelectedPayment(null)}
+          onSave={(amount, mode) => handleRecordPayment(selectedPayment, amount, mode)}
+        />
+      )}
     </ThemedView>
   );
 }
@@ -156,6 +205,13 @@ const styles = StyleSheet.create({
   },
   leftBlock: { gap: 4 },
   rightBlock: { alignItems: 'flex-end', gap: 6 },
+  paymentButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#111827',
+  },
+  paymentButtonText: { color: '#ffffff' },
   waBtn: {
     paddingHorizontal: 6,
     paddingVertical: 2,

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PaymentStatusToggle } from '@/components/payment-status-toggle';
+import { PaymentEntryModal } from '@/components/payment-entry-modal';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
@@ -21,9 +21,11 @@ import {
     getMembersByChit,
     getPaymentRows,
     MemberRecord,
+    PaymentMode,
     PaymentRecord,
+    parseCurrency,
+    recordPayment,
     subscribeToDbChange,
-    updatePaymentStatus,
 } from '@/lib/db';
 
 export default function ChitDetailScreen() {
@@ -37,10 +39,11 @@ export default function ChitDetailScreen() {
   const [members, setMembers] = useState<MemberRecord[]>([]);
   const [draws, setDraws] = useState<DrawRecord[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
 
   const loadData = () => {
     const allChits = getChits();
-    const found = allChits.find((c) => String(c.id) === id) || allChits[0];
+    const found = allChits.find((c) => String(c.id) === id);
     setChit(found || null);
 
     if (found) {
@@ -54,16 +57,25 @@ export default function ChitDetailScreen() {
     }
   };
 
-  const handleStatusToggle = (payment: PaymentRecord) => {
-    updatePaymentStatus(
-      payment.id || payment.member,
-      payment.status === 'Paid' ? 'Pending' : 'Paid',
-      payment.mode || 'Cash',
-    );
+  const handleRecordPayment = (payment: PaymentRecord, amount: number, mode: PaymentMode) => {
+    try {
+      if (!recordPayment(payment.id, amount, mode)) {
+        Alert.alert(t('recordPayment'), t('paymentUpdateFailed'));
+        return;
+      }
+      setSelectedPayment(null);
+    } catch (error) {
+      console.error('Unable to record member payment.', error);
+      Alert.alert(t('recordPayment'), t('paymentUpdateFailed'));
+    }
   };
 
   const handleShareWhatsApp = async (member: MemberRecord, payment?: PaymentRecord, type: 'reminder' | 'receipt' = 'reminder') => {
-    const dueStr = payment ? payment.due : `₹${chit?.before_pick.toLocaleString('en-IN') || 0}`;
+    const dueStr = payment
+      ? type === 'receipt'
+        ? `₹${payment.paid_amount.toLocaleString('en-IN')}`
+        : `₹${Math.max(0, parseCurrency(payment.due) - payment.paid_amount).toLocaleString('en-IN')}`
+      : `₹${chit?.before_pick.toLocaleString('en-IN') || 0}`;
     const modeStr = payment?.mode || 'Cash';
     const message =
       type === 'reminder'
@@ -159,13 +171,17 @@ export default function ChitDetailScreen() {
             </ThemedText>
           </View>
           <View style={styles.headerActions}>
-            <Pressable
-              onPress={() => router.push('/record-draw' as any)}
-              style={styles.actionButton}>
-              <ThemedText type="smallBold" style={styles.actionButtonText}>
-                {t('draw')}
-              </ThemedText>
-            </Pressable>
+            {chit.status !== 'closed' && (
+              <Pressable
+                onPress={() =>
+                  router.push({ pathname: '/record-draw', params: { chitId: chit.id } })
+                }
+                style={styles.actionButton}>
+                <ThemedText type="smallBold" style={styles.actionButtonText}>
+                  {t('draw')}
+                </ThemedText>
+              </Pressable>
+            )}
             {chit.status !== 'closed' && (
               <Pressable
                 onPress={handleCloseChit}
@@ -239,9 +255,14 @@ export default function ChitDetailScreen() {
           {/* Members & Payment Status Assignment */}
           <View style={styles.sectionHeader}>
             <ThemedText type="smallBold">{t('membersAndDues')} ({members.length})</ThemedText>
-            <Pressable onPress={() => router.push('/add-member')}>
-              <ThemedText type="linkPrimary">{t('addMember')}</ThemedText>
-            </Pressable>
+            {chit.status !== 'closed' && (
+              <Pressable
+                onPress={() =>
+                  router.push({ pathname: '/add-member', params: { chitId: chit.id } })
+                }>
+                <ThemedText type="linkPrimary">{t('addMember')}</ThemedText>
+              </Pressable>
+            )}
           </View>
 
           <ThemedView type="backgroundElement" style={styles.card}>
@@ -275,12 +296,25 @@ export default function ChitDetailScreen() {
                     </View>
                     {payment && (
                       <View style={styles.paymentControlsRow}>
-                        <PaymentStatusToggle
-                          isPaid={currentStatus === 'Paid'}
-                          paidLabel={t('paidStatus')}
-                          pendingLabel={currentStatus === 'Partially paid' ? t('partialStatus') : t('pendingStatus')}
-                          onToggle={() => handleStatusToggle(payment)}
-                        />
+                        <View style={{ flex: 1, gap: 4 }}>
+                          <ThemedText type="small" themeColor="textSecondary">
+                            {t('paidSoFar')}: ₹{payment.paid_amount.toLocaleString('en-IN')} / {payment.due}
+                          </ThemedText>
+                          <ThemedText type="small" themeColor="textSecondary">
+                            {t('pendingStatus')}: ₹{Math.max(0, parseCurrency(payment.due) - payment.paid_amount).toLocaleString('en-IN')}
+                          </ThemedText>
+                          <ThemedText type="smallBold">
+                            {t(currentStatus === 'Paid' ? 'paidStatus' : currentStatus === 'Partially paid' ? 'partialStatus' : 'pendingStatus')}
+                          </ThemedText>
+                        </View>
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => setSelectedPayment(payment)}
+                          style={styles.paymentButton}>
+                          <ThemedText type="smallBold" style={styles.paymentButtonText}>
+                            {t('recordPayment')}
+                          </ThemedText>
+                        </Pressable>
                       </View>
                     )}
                   </View>
@@ -319,6 +353,26 @@ export default function ChitDetailScreen() {
           </ThemedView>
         </View>
       </ScrollView>
+      {selectedPayment && (
+        <PaymentEntryModal
+          key={selectedPayment.id}
+          visible
+          memberName={selectedPayment.member}
+          due={selectedPayment.due}
+          paidAmount={selectedPayment.paid_amount}
+          mode={selectedPayment.mode || 'Cash'}
+          title={t('recordPayment')}
+          paidSoFarLabel={t('paidSoFar')}
+          paymentModeLabel={t('paymentMode')}
+          cashLabel={t('cashMode')}
+          upiLabel={t('upiMode')}
+          cancelLabel={t('cancel')}
+          saveLabel={t('save')}
+          amountError={(due) => t('amountMustBeWithinDue').replace('{due}', due)}
+          onCancel={() => setSelectedPayment(null)}
+          onSave={(amount, mode) => handleRecordPayment(selectedPayment, amount, mode)}
+        />
+      )}
     </ThemedView>
   );
 }
@@ -402,6 +456,13 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
   },
+  paymentButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#111827',
+  },
+  paymentButtonText: { color: '#ffffff' },
   waBtn: {
     paddingHorizontal: 6,
     paddingVertical: 2,

@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +22,7 @@ export default function RecordDrawScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const theme = useTheme();
   const router = useRouter();
+  const { chitId } = useLocalSearchParams<{ chitId?: string }>();
   const { t } = useTranslation();
 
   const [chits, setChits] = useState<ChitRecord[]>([]);
@@ -32,13 +33,15 @@ export default function RecordDrawScreen() {
   const [payoutAmount, setPayoutAmount] = useState<string>('0');
 
   useEffect(() => {
-    const list = getChits();
+    const list = getChits().filter((chit) => chit.status !== 'closed');
     setChits(list);
-    if (list.length > 0) {
-      setSelectedChit(list[0]);
-      setCycleMonth(String(list[0].current_month));
+    const requestedChit = list.find((chit) => String(chit.id) === chitId);
+    const initialChit = chitId ? requestedChit : list[0];
+    if (initialChit) {
+      setSelectedChit(initialChit);
+      setCycleMonth(String(initialChit.current_month));
     }
-  }, []);
+  }, [chitId]);
 
   // Automatically compute payout whenever selected chit or cycle month changes
   useEffect(() => {

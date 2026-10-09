@@ -16,7 +16,7 @@
       "package": "com.aryansai.Chitzz"
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./logo.png"
     },
     "plugins": [

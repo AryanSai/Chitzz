@@ -17,6 +17,8 @@ Complete specification and documentation of all features built in the **Chit Fun
 
 ## 2. Member Directory & Phone Sync
 - **Master Directory**: Central database of all members with search by name or phone number and filtering options (*All*, *In Active Chit*, *Unassigned*).
+- **Member Deletion**: Remove a member from the directory with confirmation while retaining their payment history and recording the action in the audit log.
+- **Member Editing**: Update a member's name, phone, status, or chit assignment after creation.
 - **Multi-Ticket Management**: Supports members holding multiple tickets/slots within a group or across different groups.
 - **Phone Contacts Sync**: Integration with device contacts allowing quick selection and importing of member details directly from phone contacts.
 
@@ -25,6 +27,7 @@ Complete specification and documentation of all features built in the **Chit Fun
 ## 3. In-Screen Payment Dues & Assignment
 - **Per-Chit Payment Dashboard**: Assign payment statuses directly inside the Chit Detail screen without requiring separate screens.
 - **Status Assignment**: Support for `Pending`, `Partial` (Partially paid), and `Paid` statuses.
+- **Partial Payment Amounts**: Record the amount paid so far against a member's due, with the remaining balance and payment status calculated automatically.
 - **Payment Modes**: Track contribution payment methods via `Cash` or `UPI`.
 - **WhatsApp Reminders & Receipts**:
   - One-tap WhatsApp button to send **Payment Reminders** to pending members or **Payment Receipts** to paid members.
@@ -66,5 +69,7 @@ Complete specification and documentation of all features built in the **Chit Fun
 
 ## 8. Audit Logging & System Engine
 - **Audit Activity Log (`/audit-log`)**: Immutable activity trail recording all financial transactions, draw events, group closures, template updates, and language changes.
-- **Local SQLite Engine**: Fast offline storage powered by Expo v57 SQLite with automatic schema migration.
+- **SQLite Source of Truth**: Chits, members, payments, draws, audit events, templates, and language settings are read from and written to Expo SQLite; browser users are migrated from the previous localStorage format once.
+- **Web Hosting Requirements**: The web app runs as a single-page app so its SQLite worker is initialized in the browser. Expo SQLite web support is alpha and requires `.wasm` bundling plus `Cross-Origin-Embedder-Policy` and `Cross-Origin-Opener-Policy` response headers.
+- **Local SQLite Engine**: Fast offline storage powered by Expo v57 SQLite with explicit startup failures and automatic schema migration.
 - **Design System**: Premium typography, clean card layouts, dark/light theme support, and strictly zero emojis across all UI elements and messages.

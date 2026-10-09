@@ -1,6 +1,7 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { getPermissionsAsync, requestPermissionsAsync } from 'expo-contacts';
+import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -17,6 +18,7 @@ export default function AddMemberScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const theme = useTheme();
   const router = useRouter();
+  const { chitId } = useLocalSearchParams<{ chitId?: string }>();
   const { t } = useTranslation();
 
   const [name, setName] = useState('');
@@ -29,22 +31,63 @@ export default function AddMemberScreen() {
   const [loadingContacts, setLoadingContacts] = useState(false);
 
   useEffect(() => {
-    const list = getChits();
+    const list = getChits().filter((chit) => chit.status !== 'closed');
     setChits(list);
-  }, []);
+    const requestedChit = list.find((chit) => String(chit.id) === chitId);
+    if (requestedChit) {
+      setSelectedChit(requestedChit.name);
+    }
+  }, [chitId]);
 
   const handleOpenContactPicker = async () => {
     setLoadingContacts(true);
     try {
+      if (Platform.OS === 'web') {
+        Alert.alert(
+          t('contactsUnavailableTitle'),
+          t('contactsUnavailableMessage'),
+        );
+        return;
+      }
+
+      let permission = await getPermissionsAsync();
+      if (!permission.granted && permission.canAskAgain) {
+        permission = await requestPermissionsAsync();
+      }
+
+      if (!permission.granted) {
+        Alert.alert(
+          t('contactsPermissionRequiredTitle'),
+          t('contactsPermissionRequiredMessage'),
+          [
+            { text: t('cancel'), style: 'cancel' },
+            {
+              text: t('openSettings'),
+              onPress: () => {
+                void Linking.openSettings().catch((error: unknown) => {
+                  console.error('Unable to open app settings for contacts permission.', error);
+                  Alert.alert(
+                    t('contactsSettingsUnavailableTitle'),
+                    t('contactsSettingsUnavailableMessage'),
+                  );
+                });
+              },
+            },
+          ],
+        );
+        return;
+      }
+
       const contact = await pickDeviceContact();
       if (contact) {
         setName(contact.name);
         setPhone(contact.phone);
       }
-    } catch {
+    } catch (error) {
+      console.error('Unable to open the device contact picker.', error);
       Alert.alert(
-        'Contacts unavailable',
-        'Use a native build and allow contact access, or enter the member details manually.',
+        t('contactsUnavailableTitle'),
+        t('contactsUnavailableMessage'),
       );
     } finally {
       setLoadingContacts(false);
@@ -59,6 +102,14 @@ export default function AddMemberScreen() {
 
     if (!trimmedName) {
       Alert.alert('Missing Name', 'Please enter member name.');
+      return;
+    }
+
+    if (
+      selectedChit !== 'Unassigned' &&
+      !chits.some((chit) => chit.name === selectedChit)
+    ) {
+      Alert.alert('Chit group unavailable', 'Choose an available chit group or select None (Unassigned).');
       return;
     }
 
@@ -106,7 +157,7 @@ export default function AddMemberScreen() {
 
             <View style={styles.fieldGroup}>
               <ThemedText type="smallBold">{t('memberName')} *</ThemedText>
-              <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="Anand Arvapelly" />
+              <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="e.g. Demo Member" />
             </View>
 
             <View style={styles.fieldGroup}>

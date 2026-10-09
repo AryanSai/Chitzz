@@ -11,7 +11,6 @@ import { useTranslation } from '@/context/language-context';
 import { useTheme } from '@/hooks/use-theme';
 import {
   clearAllData,
-  seedSampleData,
   getLedgerEntries,
   getGlobalTemplates,
   updateGlobalTemplates,
@@ -66,11 +65,6 @@ export default function SettingsScreen() {
         },
       ]
     );
-  };
-
-  const handleLoadSampleData = () => {
-    seedSampleData();
-    Alert.alert('Sample Data Loaded', 'Sample chit groups and members have been loaded for testing.');
   };
 
   return (
@@ -190,17 +184,11 @@ export default function SettingsScreen() {
             ))}
           </ThemedView>
 
-          {/* Data & Testing Tools */}
+          {/* Data Management */}
           <View style={styles.sectionHeader}>
-            <ThemedText type="smallBold">{t('dataTestingTools')}</ThemedText>
+            <ThemedText type="smallBold">{t('dataManagement')}</ThemedText>
           </View>
           <ThemedView type="backgroundElement" style={styles.card}>
-            <Pressable onPress={handleLoadSampleData} style={styles.sampleDataBtn}>
-              <ThemedText type="smallBold" style={{ color: '#111827' }}>
-                {t('loadSampleData')}
-              </ThemedText>
-            </Pressable>
-
             <Pressable onPress={handleClearAll} style={styles.clearDataBtn}>
               <ThemedText type="smallBold" style={{ color: '#dc2626' }}>
                 {t('clearAllData')}
@@ -295,12 +283,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
-  },
-  sampleDataBtn: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
   },
   clearDataBtn: {
     backgroundColor: '#fef2f2',

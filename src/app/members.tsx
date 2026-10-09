@@ -42,7 +42,17 @@ export default function MembersScreen() {
 
     const matchesChit =
       selectedChitFilter === 'All' ||
-      member.chit_name.toLowerCase() === selectedChitFilter.toLowerCase();
+      (selectedChitFilter === 'InActiveChit'
+        ? chits.some(
+            (chit) =>
+              chit.status !== 'closed' &&
+              chit.name.toLowerCase() === member.chit_name.toLowerCase(),
+          )
+        : selectedChitFilter === 'Unassigned'
+          ? member.chit_name.toLowerCase() === 'unassigned'
+          : selectedChitFilter.startsWith('chit:')
+            ? member.chit_name.toLowerCase() === selectedChitFilter.slice(5).toLowerCase()
+            : false);
 
     return matchesQuery && matchesChit;
   });
@@ -73,43 +83,48 @@ export default function MembersScreen() {
             style={styles.searchInput}
           />
 
-          {chits.length > 0 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterBar}>
+              {(['All', 'InActiveChit', 'Unassigned'] as const).map((filter) => (
               <Pressable
-                onPress={() => setSelectedChitFilter('All')}
+                key={filter}
+                onPress={() => setSelectedChitFilter(filter)}
                 style={[
                   styles.filterChip,
-                  selectedChitFilter === 'All' && styles.filterChipActive,
+                  selectedChitFilter === filter && styles.filterChipActive,
                 ]}>
                 <ThemedText
                   type="small"
                   style={[
                     styles.filterText,
-                    selectedChitFilter === 'All' && styles.filterTextActive,
+                    selectedChitFilter === filter && styles.filterTextActive,
                   ]}>
-                  {t('all')}
+                  {filter === 'All'
+                    ? t('filterAll')
+                    : filter === 'InActiveChit'
+                      ? t('filterHasChit')
+                      : t('filterNoChit')}
                 </ThemedText>
               </Pressable>
+              ))}
               {chits.map((c) => (
                 <Pressable
                   key={c.id}
-                  onPress={() => setSelectedChitFilter(c.name)}
+                  onPress={() => setSelectedChitFilter(`chit:${c.name}`)}
                   style={[
                     styles.filterChip,
-                    selectedChitFilter === c.name && styles.filterChipActive,
+                    selectedChitFilter === `chit:${c.name}` && styles.filterChipActive,
                   ]}>
                   <ThemedText
                     type="small"
                     style={[
                       styles.filterText,
-                      selectedChitFilter === c.name && styles.filterTextActive,
+                      selectedChitFilter === `chit:${c.name}` && styles.filterTextActive,
                     ]}>
                     {c.name}
                   </ThemedText>
                 </Pressable>
               ))}
-            </ScrollView>
-          )}
+          </ScrollView>
 
           <ThemedView type="backgroundElement" style={styles.listCard}>
             {filteredMembers.length === 0 ? (
