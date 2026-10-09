@@ -21,6 +21,7 @@ Complete specification and documentation of all features built in the **Chit Fun
 - **Member Editing**: Update a member's name, phone, status, or chit assignment after creation.
 - **Multi-Ticket Management**: Supports members holding multiple tickets/slots within a group or across different groups.
 - **Phone Contacts Sync**: Integration with device contacts allowing quick selection and importing of member details directly from phone contacts.
+- **Privacy-Safe Examples**: The add-member form uses a generic name example. Demo records use generic names (`Demo Member One` through `Demo Member Four`) and no personal phone numbers; existing seeded sample identities are updated locally when the database opens.
 
 ---
 
@@ -70,6 +71,7 @@ Complete specification and documentation of all features built in the **Chit Fun
 ## 8. Audit Logging & System Engine
 - **Audit Activity Log (`/audit-log`)**: Immutable activity trail recording all financial transactions, draw events, group closures, template updates, and language changes.
 - **SQLite Source of Truth**: Chits, members, payments, draws, audit events, templates, and language settings are read from and written to Expo SQLite; browser users are migrated from the previous localStorage format once.
+- **Data Management**: Settings provides a clear-data action; sample/demo data is not loaded from the Settings screen.
 - **Web Hosting Requirements**: The web app runs as a single-page app so its SQLite worker is initialized in the browser. Expo SQLite web support is alpha and requires `.wasm` bundling plus `Cross-Origin-Embedder-Policy` and `Cross-Origin-Opener-Policy` response headers.
 - **Local SQLite Engine**: Fast offline storage powered by Expo v57 SQLite with explicit startup failures and automatic schema migration.
 - **Design System**: Premium typography, clean card layouts, dark/light theme support, and strictly zero emojis across all UI elements and messages.
